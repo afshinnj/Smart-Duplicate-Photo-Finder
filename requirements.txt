@@ -1,0 +1,11 @@
+# Core dependencies (required)
+PySide6>=6.6,<7
+numpy>=1.24
+pillow>=10.0
+
+# Optional: system statistics for the dashboard / worker sizing
+psutil>=5.9
+
+# Optional: AI-powered similarity (settings page stays functional without them)
+torch>=2.0
+open_clip_torch>=2.20
