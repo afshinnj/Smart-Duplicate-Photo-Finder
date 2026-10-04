@@ -1,91 +1,104 @@
-# Smart Duplicate Photo Finder — یاب هوشمند عکس‌های تکراری
+# یاب هوشمند عکس‌های تکراری — Smart Duplicate Photo Finder
 
-A desktop application (Windows-first, PySide6) that finds **exact** and
-**similar** photos on a computer and helps reclaim the wasted space safely —
-nothing is ever deleted without confirmation, and the default removal method is
-a quarantine folder with full undo.
+برنامه دسکتاپ (مبتنی بر PySide6، ویندوز) که عکس‌های **تکراری** و **مشابه** را
+روی سیستم پیدا می‌کند و به پس گرفتن فضای هدر رفته به‌صورت ایمن کمک می‌کند —
+هیچ فایلی بدون تأیید کاربر حذف نمی‌شود و روش پیش‌فرض، قرنطینه در یک پوشه با
+قابلیت کامل بازگردانی است.
 
-Everything runs locally. No network access, no telemetry.
+همه‌چیز به‌صورت محلی اجرا می‌شود. بدون دسترسی به شبکه، بدون ارسال داده.
 
-## Features
+## امکانات
 
-- **Multi-stage pipeline** — filesystem walk → image detection → metadata +
-  SHA-256 → exact duplicates → perceptual hashing (pHash / aHash / dHash /
-  wHash) → similarity (histogram, SSIM, ORB feature matching) → grouping.
-- **Smart "keep this" recommendation** — ranks group members by resolution,
-  compression quality, creation date, file-name and path hints, so the original
-  is kept and the derived copies are the ones flagged for removal.
-- **Pause / resume / cancel** any scan at any stage; live progress, ETA and
-  per-stage percentages.
-- **Safe cleanup** — quarantine (undoable), Windows Recycle Bin, or permanent
-  deletion with an extra warning. Protected system locations are refused
-  outright.
-- **Scan history** — every session is stored in SQLite with its groups, so
-  results can be re-opened later without re-scanning.
-- **Image comparison** — side-by-side viewer with per-method similarity scores.
-- **Persian (RTL) and English** UI with a dark and light theme.
-- **Optional AI similarity** — local embeddings or CLIP when `torch` /
-  `open_clip_torch` are installed; the app works without them.
+- **خط لوله چندمرحله‌ای** — پیمایش فایل‌سیستم ← تشخیص تصویر ← فراداده +
+  SHA-256 ← تکراری‌های دقیق ← هش ادراکی (pHash / aHash / dHash / wHash) ←
+  تشابه (هیستوگرام، SSIM، تطبیق ویژگی ORB) ← گروه‌بندی.
+- **پیشنهاد هوشمند «این نگه داشته شود»** — اعضای هر گروه بر اساس رزولوشن،
+  کیفیت فشرده‌سازی، تاریخ ساخت و نام/مسیر فایل رتبه‌بندی می‌شوند، تا اصل
+  نگه داشته شود و نسخه‌های مشتق برای حذف علامت بخورند.
+- **مکث / ادامه / لغو** اسکن در هر مرحله؛ پیشرفت زنده، زمان باقی‌مانده و
+  درصد هر مرحله.
+- **پاک‌سازی ایمن** — قرنطینه (قابل بازگردانی)، سطل بازیافت ویندوز، یا حذف
+  دائمی با هشدار اضافی. مسیرهای سیستمی محافظت‌شده کلاً رد می‌شوند.
+- **تاریخچه اسکن** — هر نشست با گروه‌هایش در SQLite ذخیره می‌شود و نتایج را
+  می‌توان بعداً بدون اسکن دوباره باز کرد.
+- **مقایسه تصاویر** — نمایشگر کنار هم با امتیاز تشابه به تفکیک روش.
+- **رابط فارسی (راست‌چین) و انگلیسی** با تم تاریک و روشن.
+- **تشابه مبتنی بر هوش مصنوعی (اختیاری)** — embedding یا CLIP محلی وقتی
+  `torch` / `open_clip_torch` نصب باشند؛ برنامه بدون آن‌ها هم کار می‌کند.
 
-## Requirements
+## پیش‌نیازها
 
-- Python 3.11+
+- پایتون ۳.۱۱ به بالا
 - `pip install -r requirements.txt`
 
-Core dependencies: **PySide6**, **numpy**, **pillow**.
-Optional: **psutil** (system stats), **torch** + **open_clip_torch** (AI engines).
+وابستگی‌های اصلی: **PySide6**، **numpy**، **pillow**.
+اختیاری: **psutil** (آمار سیستم)، **torch** + **open_clip_torch** (موتورهای AI).
 
-## Running
+## اجرا
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-Configuration, logs, thumbnails, quarantine and the SQLite database live under
-`%APPDATA%\SmartDuplicatePhotoFinder\` (see `src/core/constants.py`).
+تنظیمات، لاگ‌ها، تصاویر بندانگشتی، قرنطینه و دیتابیس SQLite در مسیر
+`%APPDATA%\SmartDuplicatePhotoFinder\` قرار می‌گیرند (به `src/core/constants.py`
+مراجعه کنید).
 
-## Architecture
+## معماری
 
 ```
-main.py                     entry point: logging, config, database, window
+main.py                     نقطه ورود: لاگ، تنظیمات، دیتابیس، پنجره
 src/
-  core/                     constants, config, logging, system info, exceptions
-  scanner/                  filesystem walk, drive enumeration, image detection
-  hashing/                  SHA-256, perceptual hashes, hash cache
-  similarity/               histogram / SSIM / feature matching, image loading
-  ai/                       optional embedding + CLIP engines
-  models/                   ImageRecord, DuplicateGroup, ScanSession, results
-  database/                 SQLite wrapper, migrations, repositories
-  services/                 scan pipeline, grouping, cleanup (undo), history
-  workers/                  QThread wrappers around the services
-  i18n/                     fa.json / en.json + Translator
-  ui/                       main window, pages, widgets, styles, thumbnails
-tests/                      unittest suite
+  core/                     ثابت‌ها، تنظیمات، لاگ، اطلاعات سیستم، استثناها
+  scanner/                  پیمایش فایل‌سیستم، شمارش درایوها، تشخیص تصویر
+  hashing/                  SHA-256، هش‌های ادراکی، کش هش
+  similarity/               هیستوگرام / SSIM / تطبیق ویژگی، بارگذاری تصویر
+  ai/                       موتورهای اختیاری embedding و CLIP
+  models/                   ImageRecord، DuplicateGroup، ScanSession، نتایج
+  database/                 پوشش SQLite، migrationها، repositoryها
+  services/                 خط لوله اسکن، گروه‌بندی، پاک‌سازی (بازگردانی)، تاریخچه
+  workers/                  پوشش‌های QThread دور سرویس‌ها
+  i18n/                     fa.json / en.json + مترجم
+  ui/                       پنجره اصلی، صفحات، ویجت‌ها، استایل‌ها، بندانگشتی‌ها
+tests/                      مجموعه تست
 ```
 
-The UI never blocks: heavy work runs in `QThread` workers
-(`src/workers/`) that emit Qt signals the pages subscribe to.
+رابط کاربری هرگز مسدود نمی‌شود: کارهای سنگین در workerهای `QThread`
+(`src/workers/`) اجرا می‌شوند که سیگنال‌های Qt منتشر می‌کنند و صفحات آن‌ها را
+دریافت می‌کنند.
 
-## Tests
+## تست‌ها
 
 ```bash
 python -m unittest discover -t . -s tests
 ```
 
-The suite covers configuration round-trips, hashing, grouping logic, the full
-scan pipeline on a synthetic photo set, quarantine + undo, i18n, and an
-offscreen smoke test of the Qt layer (`QT_QPA_PLATFORM=offscreen`).
+این مجموعه، رفت‌وبرگشت تنظیمات، هش‌کردن، منطق گروه‌بندی، کامل خط لوله اسکن
+روی یک مجموعه عکس مصنوعی، قرنطینه + بازگردانی، i18n و یک تست دودی offscreen
+از لایه Qt (`QT_QPA_PLATFORM=offscreen`) را پوشش می‌دهد.
 
-## Safety notes
+## ساخت فایل نصب
 
-- Scans are read-only.
-- `CleanupService` refuses protected paths (`Windows`, `Program Files`,
-  `AppData\Local`, executables, …) via `is_protected_path`.
-- The configured default method is `QUARANTINE`; every quarantined file can be
-  restored from **Settings → Cleanup** or the results page's undo button, and
-  expires automatically after the configured retention window.
+```bash
+py -m PyInstaller build.spec
+py make_installer.py
+```
 
-## License
+خروجی نهایی `dist/SmartDuplicatePhotoFinder-Setup.exe` است: یک نصب‌کننده
+تک‌فایلی که تمام برنامه را در خود دارد و روی هر سیستم ویندوز ۱۰ (۶۴ بیتی) یا
+جدیدتر، بدون هیچ پیش‌نیازی اجرا می‌شود. جزئیات بیشتر در `dist/INSTALL.md`.
 
-Proprietary — © Afshin Software.
+## نکات ایمنی
+
+- اسکن‌ها فقط خواندنی هستند.
+- `CleanupService` مسیرهای محافظت‌شده (`Windows`، `Program Files`،
+  `AppData\Local`، فایلهای اجرایی و …) را از طریق `is_protected_path` رد
+  می‌کند.
+- روش پیش‌فرض `QUARANTINE` است؛ هر فایل قرنطینه‌شده را می‌توان از **تنظیمات ←
+  پاک‌سازی** یا دکمه بازگردانی صفحه نتایج بازیابی کرد، و پس از پایان دوره
+  نگهداری به‌طور خودکار منقضی می‌شود.
+
+## لایسنس
+
+اختصاصی — © Afshin Software.
