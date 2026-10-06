@@ -1,0 +1,12 @@
+# Optional: AI-powered similarity (embedding / CLIP engines).
+#
+# The application runs fine without these - when they are absent the settings
+# page still works and scans simply skip the AI stage. torch is large, so it is
+# kept out of the default install.
+#
+#   pip install -r requirements-ai.txt
+#
+# An upper bound keeps a major torch release from silently breaking the
+# open_clip_torch API this project targets.
+torch>=2.0,<3
+open_clip_torch>=2.20

@@ -1,4 +1,4 @@
--- Initial schema for Smart Duplicate Photo Finder.
+-- Initial schema for DupliPix.
 -- Every image discovered during a scan is cached here so subsequent scans can
 -- reuse hashes and metadata instead of re-reading the file from disk.
 

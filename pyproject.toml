@@ -1,0 +1,99 @@
+[project]
+name = "duplipix"
+version = "1.0.0"
+description = "تشخیص عکس‌های تکراری - find duplicate and similar photos locally."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary - Afshin Software" }
+authors = [{ name = "Afshin" }]
+keywords = ["duplicate", "photos", "image", "deduplication", "pyside6"]
+
+dependencies = [
+    "PySide6>=6.6,<7",
+    "numpy>=1.24",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+system = ["psutil>=5.9"]
+heif = ["pillow-heif>=0.10"]
+# Large AI backends; see requirements-ai.txt.
+ai = [
+    "torch>=2.0,<3",
+    "open_clip_torch>=2.20",
+]
+all = [
+    "psutil>=5.9",
+    "pillow-heif>=0.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/afshinnj/Smart-Duplicate-Photo-Finder"
+
+# ---------------------------------------------------------------------------
+# Ruff: lint + format
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "dist",
+    "build",
+    ".test_tmp",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    # The UI layer uses private access between page and widget classes that are
+    # intentionally coupled; flagging it adds noise without real benefit.
+    "SLF001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "SLF001",  # tests reach into internals on purpose
+]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ---------------------------------------------------------------------------
+# mypy: the codebase is fully annotated; keep it that way.
+# ---------------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["src"]
+strict = false
+disallow_untyped_defs = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+no_implicit_optional = true
+ignore_missing_imports = true
+exclude = ["dist/", "build/", "\\.test_tmp/"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+# ---------------------------------------------------------------------------
+# Test runner
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

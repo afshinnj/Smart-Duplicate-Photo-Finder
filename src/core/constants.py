@@ -13,8 +13,8 @@ from enum import Enum, auto
 # Branding (change here to re-brand the whole application)
 # ---------------------------------------------------------------------------
 
-APP_NAME: str = "Smart Duplicate Photo Finder"
-APP_SHORT_NAME: str = "Photo Finder"
+APP_NAME: str = "DupliPix"
+APP_SHORT_NAME: str = "DupliPix"
 APP_VERSION: str = "1.0.0"
 APP_AUTHOR: str = "Afshin"
 ORG_NAME: str = "Afshin Software"
@@ -24,15 +24,86 @@ ORG_DOMAIN: str = "afshin.software"
 # File system locations
 # ---------------------------------------------------------------------------
 
-APP_DIR_NAME: str = "SmartDuplicatePhotoFinder"
+APP_DIR_NAME: str = "DupliPix"
+
+# Folder used before the rename to DupliPix. Kept only so an upgrade can adopt
+# the user's existing data (see ``_adopt_legacy_data_dir``).
+_LEGACY_DIR_NAME: str = "SmartDuplicatePhotoFinder"
+
+
+# When set, every user-data path (config, database, quarantine, thumbnails,
+# logs) is resolved underneath this directory instead of the real per-user
+# location. Tests use it to stay isolated from the user's actual data; the
+# shipped application never sets it.
+DATA_DIR_ENV: str = "SDPF_DATA_DIR"
 
 
 def app_data_dir() -> str:
     """Return the per-user application data directory (created lazily)."""
-    base = os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~")
-    path = os.path.join(base, APP_DIR_NAME)
+    override = os.environ.get(DATA_DIR_ENV)
+    if override:
+        path = os.path.abspath(override)
+    else:
+        base = os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~")
+        path = os.path.join(base, APP_DIR_NAME)
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def migrate_legacy_data_dir() -> None:
+    """Adopt the data directory of the previous product name, exactly once.
+
+    The application used to live in ``%APPDATA%\\SmartDuplicatePhotoFinder``.
+    After the rename to DupliPix this moves the user's settings, scan history,
+    cached thumbnails and quarantined files into the new folder so nothing is
+    orphaned. It must run once at startup, *before* the database is opened, so
+    no lock can interfere with the move.
+    """
+    if os.environ.get(DATA_DIR_ENV):  # test/offscreen runs stay isolated
+        return
+    base = os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~")
+    target = os.path.join(base, APP_DIR_NAME)
+    _adopt_legacy_data_dir(base, target)
+
+
+def _adopt_legacy_data_dir(base: str, target: str) -> None:
+    """Move the contents of the renamed ``SmartDuplicatePhotoFinder`` folder.
+
+    Runs only when the target folder is still fresh (no config or database) and
+    the legacy folder holds real data. Everything is moved, so the quarantine
+    entries stay restorable and the scan history survives the rename.
+    """
+    legacy = os.path.join(base, _LEGACY_DIR_NAME)
+    if not os.path.isdir(legacy):
+        return
+    legacy_config = os.path.join(legacy, "config.json")
+    legacy_database = os.path.join(legacy, "database.sqlite")
+    if not os.path.exists(legacy_config) and not os.path.exists(legacy_database):
+        return
+    # Already migrated (or in use) - never overwrite existing user data.
+    if os.path.exists(os.path.join(target, "config.json")) or os.path.exists(
+        os.path.join(target, "database.sqlite")
+    ):
+        return
+
+    import logging
+    import shutil
+
+    log = logging.getLogger("core.constants")
+    log.info("Migrating user data from %s to %s", legacy, target)
+    try:
+        os.makedirs(target, exist_ok=True)
+        for entry in os.listdir(legacy):
+            source = os.path.join(legacy, entry)
+            destination = os.path.join(target, entry)
+            if os.path.exists(destination):
+                continue
+            shutil.move(source, destination)
+        # Remove the old folder only when nothing was left behind.
+        if not os.listdir(legacy):
+            shutil.rmtree(legacy, ignore_errors=True)
+    except OSError as exc:
+        log.warning("User-data migration incomplete: %s", exc)
 
 
 def logs_dir() -> str:

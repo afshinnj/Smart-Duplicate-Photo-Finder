@@ -7,6 +7,7 @@ from typing import Iterable, List, Optional, Sequence
 
 from ..core.constants import DEFAULT_IMAGE_EXTENSIONS
 from ..core.exceptions import ImageProcessingError
+from ..core.image_formats import decodable_extensions
 from ..core.logger import get_logger
 from ..models.image_model import ImageMetadata, ScannedFile
 
@@ -17,8 +18,19 @@ class ImageDetector:
     """Decides which scanned files are images and reads their dimensions."""
 
     def __init__(self, extensions: Optional[Iterable[str]] = None) -> None:
-        normalized = {ext.lower().lstrip(".") for ext in (extensions or DEFAULT_IMAGE_EXTENSIONS)}
-        self.extensions = {f".{ext}" for ext in normalized}
+        requested = {ext.lower().lstrip(".") for ext in (extensions or DEFAULT_IMAGE_EXTENSIONS)}
+        # Drop formats Pillow cannot open (e.g. HEIC without pillow-heif).
+        # They would be counted as images here and then fail silently during
+        # hashing and similarity, so report them once up front instead.
+        decodable = decodable_extensions({f".{ext}" for ext in requested})
+        unsupported = {f".{ext}" for ext in requested} - decodable
+        if unsupported:
+            _log.warning(
+                "Ignoring %d image format(s) with no decoder available: %s",
+                len(unsupported),
+                ", ".join(sorted(unsupported)),
+            )
+        self.extensions = decodable
 
     # ------------------------------------------------------------------
     # Filtering

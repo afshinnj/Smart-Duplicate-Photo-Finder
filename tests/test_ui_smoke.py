@@ -23,7 +23,7 @@ from src.ui.main_window import MainWindow  # noqa: E402
 from src.ui.pages.results_page import ResultsPage  # noqa: E402
 from src.ui.widgets.group_card import GroupCard  # noqa: E402
 
-from .helpers import duplicate_set, remove_tree, temp_dir  # noqa: E402
+from .helpers import duplicate_set, isolate_app_data, remove_tree, temp_dir  # noqa: E402
 
 _APPLICATION = None
 
@@ -73,6 +73,9 @@ def _group_from_files(paths) -> DuplicateGroup:
 class TestWidgets(unittest.TestCase):
     def setUp(self) -> None:
         application()
+        # AppContext() with no arguments opens the *user's* real database and
+        # configuration; redirect everything to a throwaway directory.
+        self.addCleanup(isolate_app_data())
 
     def test_group_card_builds(self) -> None:
         card = GroupCard(_group(), 0)
@@ -138,6 +141,7 @@ class TestWidgets(unittest.TestCase):
 class TestMainWindow(unittest.TestCase):
     def setUp(self) -> None:
         application()
+        self.addCleanup(isolate_app_data())
 
     def test_window_navigates_every_page(self) -> None:
         window = MainWindow(AppContext())

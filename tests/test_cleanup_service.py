@@ -11,7 +11,7 @@ from src.core.exceptions import CleanupError
 from src.database.database import Database
 from src.services.cleanup_service import CleanupService, is_protected_path
 
-from .helpers import duplicate_set, remove_tree, temp_dir
+from .helpers import duplicate_set, isolate_app_data, remove_tree, temp_dir
 
 
 class TestProtectedPaths(unittest.TestCase):
@@ -26,6 +26,9 @@ class TestProtectedPaths(unittest.TestCase):
 
 class TestCleanupService(unittest.TestCase):
     def setUp(self) -> None:
+        # Quarantine lands in constants.quarantine_dir(); without this the
+        # removed files would pile up in the user's real quarantine folder.
+        self.addCleanup(isolate_app_data())
         self.root = temp_dir()
         self.layout = duplicate_set(self.root)
         self.database = Database(path=self.root + "/cleanup.sqlite")

@@ -21,7 +21,7 @@ from src.ui.main_window import MainWindow  # noqa: E402
 from src.ui.pages.results_page import ResultsPage  # noqa: E402
 from src.workers.scan_worker import ScanWorker  # noqa: E402
 
-from .helpers import duplicate_set, remove_tree, temp_dir  # noqa: E402
+from .helpers import duplicate_set, isolate_app_data, remove_tree, temp_dir  # noqa: E402
 
 _APPLICATION = None
 
@@ -126,6 +126,11 @@ class TestMainWindowScanFlow(unittest.TestCase):
 
     def setUp(self) -> None:
         application()
+        # Isolate *all* user data, not just the database: AppContext loads the
+        # persisted configuration too, whose last_scan_folders would otherwise
+        # add the user's real photo library to this scan.
+        self._restore_app_data = isolate_app_data()
+        self.addCleanup(self._restore_app_data)
         self.root = temp_dir()
         self.layout = duplicate_set(self.root)
         # An isolated database: the shared user database accumulates images

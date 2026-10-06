@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
 import uuid
-from typing import Tuple
+from contextlib import contextmanager
+from typing import Callable, Iterator, Tuple
+
+from src.core.constants import DATA_DIR_ENV
 
 # Fixture folders live under the repository rather than the system temp dir:
 # ``C:\...\AppData\Local\Temp`` is a protected location for the cleanup service,
@@ -81,3 +83,41 @@ def remove_tree(path: str) -> None:
     # Drop the shared fixture folder once the last test directory is gone.
     if os.path.isdir(_PROJECT_TMP) and not os.listdir(_PROJECT_TMP):
         shutil.rmtree(_PROJECT_TMP, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# User-data isolation
+# ---------------------------------------------------------------------------
+
+
+def isolate_app_data() -> Callable[[], None]:
+    """Point every user-data path at a throwaway directory.
+
+    Returns a cleanup callable: ``restore = isolate_app_data()`` in ``setUp``
+    and ``restore()`` in ``tearDown`` (or hand it to ``addCleanup``). Without
+    this, tests that build an :class:`~src.ui.app_context.AppContext` load the
+    user's real configuration (including ``last_scan_folders``), write back to
+    it, and can even purge the user's real quarantine folder.
+    """
+    tmp = temp_dir()
+    saved = os.environ.get(DATA_DIR_ENV)
+    os.environ[DATA_DIR_ENV] = tmp
+
+    def restore() -> None:
+        if saved is None:
+            os.environ.pop(DATA_DIR_ENV, None)
+        else:
+            os.environ[DATA_DIR_ENV] = saved
+        remove_tree(tmp)
+
+    return restore
+
+
+@contextmanager
+def isolated_app_data() -> Iterator[str]:
+    """Context-manager flavour of :func:`isolate_app_data`."""
+    restore = isolate_app_data()
+    try:
+        yield os.environ[DATA_DIR_ENV]
+    finally:
+        restore()

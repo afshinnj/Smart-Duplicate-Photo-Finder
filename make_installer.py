@@ -1,9 +1,9 @@
-"""Self-extracting installer generator for Smart Duplicate Photo Finder.
+"""Self-extracting installer generator for DupliPix (تشخیص عکس‌های تکراری).
 
-Emits ``dist/SmartDuplicatePhotoFinder-Setup.exe``: a single file that, when
+Emits ``dist/DupliPix-Setup.exe``: a single file that, when
 run on a clean Windows machine, extracts the PyInstaller ``onedir`` tree into
-``%LOCALAPPDATA%\Programs\SmartDuplicatePhotoFinder`` and creates Start Menu +
-Desktop shortcuts pointing at the bundled ``SmartDuplicatePhotoFinder.exe``.
+``%LOCALAPPDATA%\Programs\DupliPix`` and creates Start Menu +
+Desktop shortcuts pointing at the bundled ``DupliPix.exe``.
 
 The payload is a plain zip archive appended after a small launcher stub, so the
 distribution stays a single file with no external tooling required.
@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-_APP_NAME = "SmartDuplicatePhotoFinder"
+_APP_NAME = "DupliPix"
 _EXE_NAME = f"{_APP_NAME}.exe"
 
 

@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Smart Duplicate Photo Finder.
+"""PyInstaller spec for DupliPix (تشخیص عکس‌های تکراری).
 
-Produces a self-contained ``dist/SmartDuplicatePhotoFinder`` directory that runs
+Produces a self-contained ``dist/DupliPix`` directory that runs
 on a clean Windows machine with no Python installed.
 
 Optional dependencies (``torch`` / ``open_clip_torch`` / ``psutil``) are *not*
@@ -97,7 +97,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="SmartDuplicatePhotoFinder",
+    name="DupliPix",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -118,5 +118,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="SmartDuplicatePhotoFinder",
+    name="DupliPix",
 )

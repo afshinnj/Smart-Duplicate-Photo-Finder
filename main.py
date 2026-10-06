@@ -1,4 +1,4 @@
-"""Smart Duplicate Photo Finder - application entry point.
+"""DupliPix — تشخیص عکس‌های تکراری. Application entry point.
 
 Boots logging, loads the persisted configuration, opens the SQLite database and
 shows the main window. Everything runs locally; no network access is needed.
@@ -31,6 +31,8 @@ def _bootstrap() -> Optional[AppContext]:
     """Build the backend context, reporting failures instead of crashing."""
     setup_logging()
     try:
+        # Bring the previous product name's data home before anything opens it.
+        constants.migrate_legacy_data_dir()
         config = AppConfig.load()
         translator().set_language(config.general.language.value)
         database = Database()

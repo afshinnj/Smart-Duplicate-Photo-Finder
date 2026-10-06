@@ -6,6 +6,6 @@ pillow>=10.0
 # Optional: system statistics for the dashboard / worker sizing
 psutil>=5.9
 
-# Optional: AI-powered similarity (settings page stays functional without them)
-torch>=2.0
-open_clip_torch>=2.20
+# Optional: HEIC/HEIF decode (iPhone photos). Without it, .heic/.heif files
+# are detected by extension but skipped during scanning with a log warning.
+pillow-heif>=0.10
