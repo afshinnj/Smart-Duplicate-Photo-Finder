@@ -39,7 +39,7 @@ class DashboardPage(QWidget):
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
+        root.setContentsMargins(28, 24, 28, 24)
         root.setSpacing(18)
 
         self._title = QLabel(tr("nav_dashboard"), self)

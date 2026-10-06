@@ -7,6 +7,8 @@ actions (view results of a given session, compare two images) are wired here.
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, QTimer
@@ -94,16 +96,28 @@ class MainWindow(QMainWindow):
     def _build_sidebar(self) -> QFrame:
         sidebar = QFrame(self)
         sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(216)
+        sidebar.setFixedWidth(220)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(12, 18, 12, 18)
+        layout.setContentsMargins(12, 16, 12, 14)
         layout.setSpacing(6)
 
+        # Brand row: an accent tile with the app glyph next to the product name,
+        # mirroring the Windows 11 navigation header.
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(4, 0, 4, 0)
+        brand_row.setSpacing(10)
+        self._brand_icon = QLabel("◫", sidebar)
+        self._brand_icon.setObjectName("BrandIcon")
+        self._brand_icon.setFixedSize(34, 34)
+        self._brand_icon.setAlignment(Qt.AlignCenter)
+        brand_row.addWidget(self._brand_icon)
         self._brand = QLabel(constants.APP_NAME, sidebar)
         self._brand.setObjectName("PageTitle")
         self._brand.setWordWrap(True)
-        layout.addWidget(self._brand)
-        layout.addSpacing(12)
+        brand_row.addWidget(self._brand)
+        brand_row.addStretch()
+        layout.addLayout(brand_row)
+        layout.addSpacing(14)
 
         self._nav_group = QButtonGroup(sidebar)
         self._nav_group.setExclusive(True)
@@ -122,6 +136,13 @@ class MainWindow(QMainWindow):
             self._pages[key] = page
 
         layout.addStretch()
+
+        separator = QFrame(sidebar)
+        separator.setObjectName("SidebarSeparator")
+        separator.setFixedHeight(1)
+        layout.addWidget(separator)
+        layout.addSpacing(6)
+
         version = QLabel(f"{constants.APP_VERSION}", sidebar)
         version.setObjectName("DimLabel")
         version.setAlignment(Qt.AlignCenter)
@@ -188,6 +209,11 @@ class MainWindow(QMainWindow):
 
     def _purge_quarantine_later(self) -> None:
         """Expire old quarantine entries shortly after startup, off the UI path."""
+        # Never touch real user data when the app-data location has been
+        # overridden (test/CI runs): the timer fires asynchronously and could
+        # otherwise delete files from the user's actual quarantine folder.
+        if os.environ.get(constants.DATA_DIR_ENV):
+            return
         QTimer.singleShot(2500, self._purge_quarantine)
 
     def _purge_quarantine(self) -> None:
@@ -295,6 +321,27 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         self.setStyleSheet(style_sheet(self._context.config.general.theme, translator().is_rtl))
+        self._apply_window_chrome()
+
+    def _apply_window_chrome(self) -> None:
+        """Match the native title bar to the app theme on Windows 10/11.
+
+        ``DWMWA_USE_IMMERSIVE_DARK_MODE`` is a documented DWM attribute that
+        only repaints the non-client area, so it cannot break the Qt content.
+        Everything is best-effort: on any other platform, or if the DWM call is
+        unavailable, the window simply keeps its default chrome.
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+
+            value = ctypes.c_int(0 if self._context.config.general.theme == Theme.LIGHT else 1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                int(self.winId()), 20, ctypes.byref(value), ctypes.sizeof(value)
+            )
+        except Exception:
+            _log.debug("Immersive dark mode not applied")
 
     def _apply_direction(self) -> None:
         direction = translator().layout_direction

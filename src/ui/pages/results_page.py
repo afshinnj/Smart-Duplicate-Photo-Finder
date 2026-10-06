@@ -57,7 +57,7 @@ class ResultsPage(QWidget):
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
+        root.setContentsMargins(28, 24, 28, 24)
         root.setSpacing(14)
 
         header = QHBoxLayout()
@@ -148,9 +148,10 @@ class ResultsPage(QWidget):
         self._scroll.setWidget(self._container)
         root.addWidget(self._scroll, stretch=1)
 
-        self._empty_label = QLabel(tr("results_empty"), self)
-        self._empty_label.setObjectName("DimLabel")
+        self._empty_label = QLabel("", self)
+        self._empty_label.setObjectName("EmptyState")
         self._empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_label.setTextFormat(Qt.RichText)
         root.addWidget(self._empty_label)
 
         self._update_undo_state()
@@ -230,10 +231,13 @@ class ResultsPage(QWidget):
         empty = not self._cards
         self._empty_label.setVisible(empty)
         self._scroll.setVisible(not empty)
-        self._empty_label.setText(
+        message = (
             tr("results_unavailable")
             if not self._groups
             else tr("results_empty")
+        )
+        self._empty_label.setText(
+            f"<div style='font-size:36px'>◫</div><br>{message}"
         )
 
     # ------------------------------------------------------------------

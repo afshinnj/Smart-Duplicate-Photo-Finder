@@ -55,7 +55,7 @@ class ImageTile(QFrame):
         self.thumbnail = QLabel(self)
         self.thumbnail.setFixedSize(self.TILE_SIZE, self.TILE_SIZE)
         self.thumbnail.setAlignment(Qt.AlignCenter)
-        self.thumbnail.setStyleSheet("background-color: #0d1117; border-radius: 6px;")
+        self.thumbnail.setObjectName("ThumbnailPlaceholder")
         self.thumbnail.setText("…")
         layout.addWidget(self.thumbnail)
 
@@ -75,9 +75,7 @@ class ImageTile(QFrame):
         row.setSpacing(4)
 
         self._keep_badge = QLabel("", self)
-        self._keep_badge.setStyleSheet(
-            "color: #22c55e; font-weight: 700; padding: 2px 6px;"
-        )
+        self._keep_badge.setObjectName("KeepBadge")
         row.addWidget(self._keep_badge)
 
         self.check = QCheckBox(self)
@@ -173,9 +171,9 @@ class GroupCard(QFrame):
         header.setSpacing(10)
 
         self.badge = QLabel("", self)
-        self.badge.setStyleSheet(
-            "padding: 2px 8px; border-radius: 6px; font-weight: 700;"
-        )
+        # The exact/similar variant is known up-front; choosing the object name
+        # here lets the stylesheet pick the right colours without a re-polish.
+        self.badge.setObjectName("BadgeExact" if self.group.is_exact else "BadgeSimilar")
         header.addWidget(self.badge)
 
         self.title = QLabel("", self)
@@ -246,10 +244,6 @@ class GroupCard(QFrame):
         )
         exact = group.is_exact
         self.badge.setText(tr("results_filter_exact") if exact else tr("results_filter_similar"))
-        self.badge.setStyleSheet(
-            "padding: 2px 8px; border-radius: 6px; font-weight: 700; color: #ffffff;"
-            + ("background-color: #22c55e;" if exact else "background-color: #3b82f6;")
-        )
 
     def _emit_delete(self) -> None:
         self.delete_requested.emit(self.group, self.selected_records())

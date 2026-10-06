@@ -50,7 +50,7 @@ class HistoryPage(QWidget):
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
+        root.setContentsMargins(28, 24, 28, 24)
         root.setSpacing(14)
 
         header = QHBoxLayout()
@@ -84,10 +84,12 @@ class HistoryPage(QWidget):
         actions.addWidget(self._btn_delete)
         root.addLayout(actions)
 
-        self._empty_label = QLabel(tr("history_empty"), self)
-        self._empty_label.setObjectName("DimLabel")
+        self._empty_label = QLabel("", self)
+        self._empty_label.setObjectName("EmptyState")
         self._empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_label.setTextFormat(Qt.RichText)
         root.addWidget(self._empty_label)
+        self._update_empty_text()
 
         self._table.itemSelectionChanged.connect(self._update_actions)
         self._update_actions()
@@ -218,6 +220,11 @@ class HistoryPage(QWidget):
         self._btn_refresh.setText(tr("history_refresh"))
         self._btn_view.setText(tr("history_view_results"))
         self._btn_delete.setText(tr("history_delete"))
-        self._empty_label.setText(tr("history_empty"))
+        self._update_empty_text()
         self._populate()
         self._update_actions()
+
+    def _update_empty_text(self) -> None:
+        self._empty_label.setText(
+            f"<div style='font-size:36px'>◷</div><br>{tr('history_empty')}"
+        )

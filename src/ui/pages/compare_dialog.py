@@ -49,7 +49,7 @@ class ZoomableImage(QWidget):
         self._label = QLabel(self)
         self._label.setAlignment(Qt.AlignCenter)
         self._label.setMinimumSize(320, 240)
-        self._label.setStyleSheet("background-color: #0d1117; border-radius: 8px;")
+        self._label.setObjectName("ImagePlaceholder")
         layout.addWidget(self._title)
         layout.addWidget(self._label, stretch=1)
         layout.addWidget(self._name)

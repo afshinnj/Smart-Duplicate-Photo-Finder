@@ -8,6 +8,7 @@ venv/
 
 # Test artifacts
 .test_tmp/
+.render_tmp/
 .coverage
 htmlcov/
 

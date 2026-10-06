@@ -61,7 +61,7 @@ class ScanPage(QWidget):
 
     def _build(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
+        root.setContentsMargins(28, 24, 28, 24)
         root.setSpacing(16)
 
         self._title = QLabel(tr("nav_scan"), self)
@@ -193,12 +193,16 @@ class ScanPage(QWidget):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
+        header.setSpacing(12)
         self._stage_label = QLabel(tr("status_ready"), frame)
         self._stage_label.setObjectName("PageSubtitle")
+        self._percent_label = QLabel("0%", frame)
+        self._percent_label.setObjectName("PageSubtitle")
         self._elapsed_label = QLabel("", frame)
         self._elapsed_label.setObjectName("DimLabel")
         header.addWidget(self._stage_label)
         header.addStretch()
+        header.addWidget(self._percent_label)
         header.addWidget(self._elapsed_label)
         layout.addLayout(header)
 
@@ -269,7 +273,8 @@ class ScanPage(QWidget):
         bar = QProgressBar(parent)
         bar.setRange(0, 100)
         bar.setValue(0)
-        bar.setTextVisible(True)
+        # Win11 progress bars are slim pills; the percentage lives in the header.
+        bar.setTextVisible(False)
         return bar
 
     # ------------------------------------------------------------------
@@ -422,6 +427,7 @@ class ScanPage(QWidget):
     def _reset_progress(self) -> None:
         self._overall_bar.setValue(0)
         self._stage_bar.setValue(0)
+        self._percent_label.setText("0%")
         self._files_value.setText("0")
         self._images_value.setText("0")
         self._current_value.setText("")
@@ -438,6 +444,7 @@ class ScanPage(QWidget):
 
     def _on_progress(self, update: ProgressUpdate) -> None:
         self._overall_bar.setValue(int(update.overall_progress))
+        self._percent_label.setText(f"{int(update.overall_progress)}%")
         self._stage_bar.setValue(int(update.stage_progress))
         self._files_value.setText(f"{update.files_scanned:,}")
         self._images_value.setText(f"{update.images_found:,}")
