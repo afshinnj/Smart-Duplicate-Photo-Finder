@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, QRunnable, QThreadPool, QObject, QSize, Signal
+from PySide6.QtGui import QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QGridLayout,
@@ -27,6 +27,28 @@ from PySide6.QtWidgets import (
 from ...core.constants import rate_similarity
 from ...i18n import tr
 from ..widgets.group_card import rating_label
+
+
+class _ScoreSignals(QObject):
+    finished = Signal(object)
+
+
+class _ScoreWorker(QRunnable):
+    """Run the potentially expensive image comparison away from the UI thread."""
+
+    def __init__(self, engine, record_a, record_b) -> None:
+        super().__init__()
+        self.engine = engine
+        self.record_a = record_a
+        self.record_b = record_b
+        self.signals = _ScoreSignals()
+
+    def run(self) -> None:
+        try:
+            result = self.engine.compare(self.record_a, self.record_b)
+        except Exception:
+            result = None
+        self.signals.finished.emit(result)
 
 
 class ZoomableImage(QWidget):
@@ -55,7 +77,13 @@ class ZoomableImage(QWidget):
         layout.addWidget(self._name)
 
     def set_image(self, path: str) -> None:
-        pixmap = QPixmap(path)
+        reader = QImageReader(path)
+        reader.setAutoTransform(True)
+        size = reader.size()
+        if size.isValid() and (size.width() > 1600 or size.height() > 1200):
+            scale = min(1600 / size.width(), 1200 / size.height())
+            reader.setScaledSize(QSize(round(size.width() * scale), round(size.height() * scale)))
+        pixmap = QPixmap.fromImage(reader.read())
         self._pixmap = pixmap if not pixmap.isNull() else None
         self._name.setText(path)
         self._name.setToolTip(path)
@@ -94,6 +122,7 @@ class CompareDialog(QDialog):
         self._record_b = record_b
         self._engine = similarity_engine
         self._zoom = 1.0
+        self._score_worker = None
         self.setWindowTitle(tr("compare_title"))
         self.resize(960, 640)
         self._build()
@@ -168,7 +197,9 @@ class CompareDialog(QDialog):
         box = QGroupBox(tr("results_similarity"), self)
         layout = QVBoxLayout(box)
         self._score_table = QTableWidget(0, 2, box)
-        self._score_table.setHorizontalHeaderLabels([tr("results_similarity"), ""])
+        self._score_table.setHorizontalHeaderLabels(
+            [tr("compare_method"), tr("compare_score")]
+        )
         self._score_table.verticalHeader().setVisible(False)
         self._score_table.horizontalHeader().setStretchLastSection(True)
         self._score_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -185,25 +216,37 @@ class CompareDialog(QDialog):
         self._preview_b.set_image(self._record_b.path)
 
     def _load_scores(self) -> None:
-        try:
-            result = self._engine.compare(self._record_a, self._record_b)
-        except Exception:
-            result = None
+        self._score_label.setText(tr("compare_calculating"))
+        self._score_worker = _ScoreWorker(self._engine, self._record_a, self._record_b)
+        self._score_worker.signals.finished.connect(self._show_scores)
+        QThreadPool.globalInstance().start(self._score_worker)
 
+    def _show_scores(self, result) -> None:
         if result is None:
-            self._score_label.setText(tr("results_similarity"))
+            self._score_label.setText(tr("compare_unavailable"))
             return
 
         self._score_label.setText(f"{result.score:.1f}%")
         self._rating_label.setText(rating_label(rate_similarity(result.score)))
 
-        scores = dict(result.method_scores)
+        method_labels = {
+            "sha256": tr("compare_method_sha256"),
+            "perceptual": tr("compare_method_perceptual"),
+            "histogram": tr("compare_method_histogram"),
+            "ssim": tr("compare_method_ssim"),
+            "features": tr("compare_method_features"),
+            "ai": tr("compare_method_ai"),
+        }
+        scores = {
+            method_labels.get(method, method): (value, True)
+            for method, value in result.method_scores.items()
+        }
         if result.matched_keypoints is not None:
-            scores[tr("results_compare")] = f"{result.matched_keypoints}"
+            scores[tr("compare_matched_points")] = (result.matched_keypoints, False)
         self._score_table.setRowCount(len(scores))
-        for row, (method, value) in enumerate(scores.items()):
+        for row, (method, (value, is_score)) in enumerate(scores.items()):
             self._score_table.setItem(row, 0, QTableWidgetItem(str(method)))
-            text = f"{value:.1f}" if isinstance(value, (int, float)) else str(value)
+            text = f"{value:.1f}%" if is_score else str(value)
             self._score_table.setItem(row, 1, QTableWidgetItem(text))
 
     # ------------------------------------------------------------------

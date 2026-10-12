@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QInputDialog,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -102,7 +103,21 @@ class ScanPage(QWidget):
         self._combo_targets.addItem(tr("scan_usb_drives"), "removable")
         self._combo_targets.addItem(tr("scan_select_folder"), "folders")
         self._combo_targets.currentIndexChanged.connect(self._target_changed)
+        profile_row = QHBoxLayout()
+        self._profile_combo = QComboBox(box)
+        self._btn_save_profile = QPushButton(tr("scan_profile_save"), box)
+        self._btn_save_profile.setObjectName("SecondaryButton")
+        self._btn_delete_profile = QPushButton(tr("scan_profile_delete"), box)
+        self._btn_delete_profile.setObjectName("SecondaryButton")
+        self._btn_save_profile.clicked.connect(self._save_profile)
+        self._btn_delete_profile.clicked.connect(self._delete_profile)
+        self._profile_combo.currentIndexChanged.connect(self._load_selected_profile)
+        profile_row.addWidget(self._profile_combo, stretch=1)
+        profile_row.addWidget(self._btn_save_profile)
+        profile_row.addWidget(self._btn_delete_profile)
+        layout.addLayout(profile_row)
         layout.addWidget(self._combo_targets)
+        self._refresh_profiles()
 
         # Folder list (shown for the "folders" target)
         self._folder_frame = QFrame(box)
@@ -315,6 +330,105 @@ class ScanPage(QWidget):
         self._max_spin.setValue(scan.max_file_size_mb)
         self._excluded_edit.setText("; ".join(scan.excluded_folders))
 
+    def _refresh_profiles(self, selected_name: Optional[str] = None) -> None:
+        self._profile_combo.blockSignals(True)
+        self._profile_combo.clear()
+        self._profile_combo.addItem(tr("scan_profile_choose"), "")
+        for name in sorted(self._context.config.scan_profiles, key=str.casefold):
+            self._profile_combo.addItem(name, name)
+        index = self._profile_combo.findData(selected_name or "")
+        self._profile_combo.setCurrentIndex(max(0, index))
+        self._profile_combo.blockSignals(False)
+        has_profile = bool(self._context.config.scan_profiles)
+        self._btn_delete_profile.setEnabled(has_profile and bool(selected_name))
+
+    def _profile_data(self) -> dict:
+        return {
+            "target": self._combo_targets.currentData(),
+            "folders": self._selected_folders(),
+            "drive_roots": self._selected_drive_roots(),
+            "include_hidden_files": self._check_hidden.isChecked(),
+            "min_file_size_mb": self._min_spin.value(),
+            "max_file_size_mb": self._max_spin.value(),
+            "excluded_folders": [
+                part.strip()
+                for part in self._excluded_edit.text().split(";")
+                if part.strip()
+            ],
+        }
+
+    def _save_profile(self) -> None:
+        current = self._profile_combo.currentData() or ""
+        name, accepted = QInputDialog.getText(
+            self, tr("scan_profile_save"), tr("scan_profile_name"), text=current
+        )
+        name = name.strip()
+        if not accepted or not name:
+            return
+        if name in self._context.config.scan_profiles and name != current:
+            answer = QMessageBox.question(
+                self, tr("scan_profile_save"), tr("scan_profile_overwrite", name=name)
+            )
+            if answer != QMessageBox.Yes:
+                return
+        self._context.config.scan_profiles[name] = self._profile_data()
+        self._context.save_config()
+        self._refresh_profiles(name)
+
+    def _delete_profile(self) -> None:
+        name = self._profile_combo.currentData()
+        if not name:
+            return
+        answer = QMessageBox.question(
+            self, tr("scan_profile_delete"), tr("scan_profile_delete_confirm", name=name)
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self._context.config.scan_profiles.pop(name, None)
+        self._context.save_config()
+        self._refresh_profiles()
+
+    def _load_selected_profile(self, _index: int = -1) -> None:
+        name = self._profile_combo.currentData()
+        self._btn_delete_profile.setEnabled(bool(name))
+        if not name:
+            return
+        profile = self._context.config.scan_profiles.get(name)
+        if not isinstance(profile, dict):
+            return
+        target_index = self._combo_targets.findData(profile.get("target"))
+        if target_index >= 0:
+            self._combo_targets.setCurrentIndex(target_index)
+        self._folder_list.clear()
+        folders = profile.get("folders", [])
+        if not isinstance(folders, list):
+            folders = []
+        for folder in folders:
+            if isinstance(folder, str):
+                self._folder_list.addItem(folder)
+        drive_roots = profile.get("drive_roots", [])
+        wanted_drives = set(drive_roots) if isinstance(drive_roots, list) else set()
+        for row in range(self._drive_list.count()):
+            item = self._drive_list.item(row)
+            root = item.data(Qt.UserRole)
+            if root:
+                item.setCheckState(Qt.Checked if root in wanted_drives else Qt.Unchecked)
+        self._check_hidden.setChecked(bool(profile.get("include_hidden_files", False)))
+        self._min_spin.setValue(self._safe_float(profile.get("min_file_size_mb"), 0.0))
+        self._max_spin.setValue(self._safe_float(profile.get("max_file_size_mb"), 0.0))
+        excluded = profile.get("excluded_folders", [])
+        if not isinstance(excluded, list):
+            excluded = []
+        self._excluded_edit.setText("; ".join(str(item) for item in excluded if item))
+        self._target_changed()
+
+    @staticmethod
+    def _safe_float(value, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
     def _add_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, tr("scan_add_folder"))
         if not folder:
@@ -359,8 +473,7 @@ class ScanPage(QWidget):
             for part in self._excluded_edit.text().split(";")
             if part.strip()
         ]
-        if excluded:
-            scan.excluded_folders = excluded
+        scan.excluded_folders = excluded
         self._context.save_config()
 
     def start_scan(self) -> None:
@@ -421,6 +534,9 @@ class ScanPage(QWidget):
         self._btn_pause.setEnabled(running)
         self._btn_cancel.setEnabled(running)
         self._combo_targets.setEnabled(not running)
+        self._profile_combo.setEnabled(not running)
+        self._btn_save_profile.setEnabled(not running)
+        self._btn_delete_profile.setEnabled(not running and bool(self._profile_combo.currentData()))
         self._btn_add.setEnabled(not running)
         self._btn_remove.setEnabled(not running)
 
@@ -464,9 +580,9 @@ class ScanPage(QWidget):
         status = getattr(result, "status", None)
         if status is not None and str(status.value) == "completed":
             self._stage_label.setText(tr("status_done"))
+            self._overall_bar.setValue(100)
         else:
             self._stage_label.setText(tr("scan_stage_cancelled"))
-        self._overall_bar.setValue(100)
         self.scan_finished.emit(result)
 
     def _on_failed(self, message: str) -> None:
@@ -487,6 +603,10 @@ class ScanPage(QWidget):
         self._combo_targets.setItemText(2, tr("scan_select_folder"))
         self._btn_add.setText(tr("scan_add_folder"))
         self._btn_remove.setText(tr("scan_remove"))
+        self._btn_save_profile.setText(tr("scan_profile_save"))
+        self._btn_delete_profile.setText(tr("scan_profile_delete"))
+        selected_profile = self._profile_combo.currentData()
+        self._refresh_profiles(selected_profile)
         self._check_hidden.setText(tr("scan_include_hidden"))
         self._min_label.setText(tr("scan_min_size"))
         self._max_label.setText(tr("scan_max_size"))

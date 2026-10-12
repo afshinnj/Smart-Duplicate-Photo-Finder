@@ -91,6 +91,7 @@ class AppConfig:
     cleanup: CleanupSettings = field(default_factory=CleanupSettings)
     ai: AISettings = field(default_factory=AISettings)
     last_scan_folders: List[str] = field(default_factory=list)
+    scan_profiles: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # (De)serialisation
@@ -108,6 +109,14 @@ class AppConfig:
             if section_name == "last_scan_folders":
                 if isinstance(section_data, list):
                     config.last_scan_folders = [str(f) for f in section_data]
+                continue
+            if section_name == "scan_profiles":
+                if isinstance(section_data, dict):
+                    config.scan_profiles = {
+                        str(name): profile
+                        for name, profile in section_data.items()
+                        if isinstance(profile, dict)
+                    }
                 continue
             section = getattr(config, section_name, None)
             if section is None or not isinstance(section_data, dict):

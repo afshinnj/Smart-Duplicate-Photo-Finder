@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -25,8 +26,10 @@ from PySide6.QtWidgets import (
 from ...core.constants import DuplicateType, SimilarityRating
 from ...models.duplicate_group import DuplicateGroup
 from ...models.image_model import ImageRecord
+from ...services.duplicate_service import SmartKeeper
 from ...services.progress import format_size
 from ...i18n import tr
+
 
 class ImageTile(QFrame):
     """One image inside a group: thumbnail, name, size and a keep badge."""
@@ -35,15 +38,27 @@ class ImageTile(QFrame):
     open_folder_requested = Signal(object)
     compare_requested = Signal(object, object)  # record, other_record
     thumbnail_requested = Signal(object, object)  # path, tile
+    keep_requested = Signal(object)
 
     TILE_SIZE = 150
 
-    def __init__(self, record: ImageRecord, keeper: bool, parent=None) -> None:
+    def __init__(
+        self,
+        record: ImageRecord,
+        keeper: bool,
+        reason_keys: List[str],
+        confidence_key: str,
+        confidence_gap: float,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.record = record
         self.keeper = keeper
+        self.reason_keys = reason_keys
+        self.confidence_key = confidence_key
+        self.confidence_gap = confidence_gap
         self.setObjectName("Card")
-        self.setFixedSize(self.TILE_SIZE + 16, self.TILE_SIZE + 74)
+        self.setFixedSize(self.TILE_SIZE + 16, self.TILE_SIZE + 202)
         self._build()
         self.retranslate()
 
@@ -70,6 +85,18 @@ class ImageTile(QFrame):
         self.meta_label.setObjectName("DimLabel")
         layout.addWidget(self.meta_label)
 
+        self.reason_label = QLabel(self)
+        self.reason_label.setObjectName("DimLabel")
+        self.reason_label.setWordWrap(True)
+        self.reason_label.setMaximumHeight(34)
+        layout.addWidget(self.reason_label)
+
+        self.confidence_label = QLabel(self)
+        self.confidence_label.setObjectName("DimLabel")
+        self.confidence_label.setWordWrap(True)
+        self.confidence_label.setMaximumHeight(34)
+        layout.addWidget(self.confidence_label)
+
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(4)
@@ -79,7 +106,10 @@ class ImageTile(QFrame):
         row.addWidget(self._keep_badge)
 
         self.check = QCheckBox(self)
+        self.check.setText(tr("results_mark_for_removal"))
+        self.check.setAccessibleName(tr("results_mark_for_removal"))
         self.check.setChecked(not self.keeper)
+        self.check.setEnabled(not self.keeper)
         self.check.stateChanged.connect(self._on_check_changed)
         row.addWidget(self.check)
         row.addStretch()
@@ -88,18 +118,31 @@ class ImageTile(QFrame):
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(2)
-        self._btn_folder = QPushButton("📁", self)
-        self._btn_folder.setObjectName("SecondaryButton")
-        self._btn_folder.setFixedSize(28, 24)
+        self._btn_folder = QPushButton(self)
+        self._btn_folder.setObjectName("IconButton")
+        self._btn_folder.setFixedSize(30, 28)
+        self._btn_folder.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
+        self._btn_folder.setIconSize(QSize(16, 16))
         self._btn_folder.setToolTip(tr("results_open_folder"))
+        self._btn_folder.setAccessibleName(tr("results_open_folder"))
         self._btn_folder.clicked.connect(
             lambda: self.open_folder_requested.emit(self.record)
         )
-        self._btn_compare = QPushButton("⇄", self)
-        self._btn_compare.setObjectName("SecondaryButton")
-        self._btn_compare.setFixedSize(28, 24)
+        self._btn_compare = QPushButton(self)
+        self._btn_compare.setObjectName("IconButton")
+        self._btn_compare.setFixedSize(30, 28)
+        self._btn_compare.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        self._btn_compare.setIconSize(QSize(16, 16))
         self._btn_compare.setToolTip(tr("results_compare"))
+        self._btn_compare.setAccessibleName(tr("results_compare"))
+        self._btn_compare.setEnabled(False)
         self._btn_compare.clicked.connect(self._emit_compare)
+        self._btn_keep = QPushButton("", self)
+        self._btn_keep.setObjectName("SecondaryButton")
+        self._btn_keep.setFixedWidth(66)
+        self._btn_keep.setFixedHeight(24)
+        self._btn_keep.clicked.connect(lambda: self.keep_requested.emit(self.record))
+        actions.addWidget(self._btn_keep)
         actions.addWidget(self._btn_folder)
         actions.addWidget(self._btn_compare)
         actions.addStretch()
@@ -131,14 +174,51 @@ class ImageTile(QFrame):
                 )
             )
 
-    def set_compare_target(self, other: ImageRecord) -> None:
+    def set_compare_target(self, other: Optional[ImageRecord]) -> None:
         self._compare_target = other
+        self._btn_compare.setEnabled(other is not None)
 
     def retranslate(self) -> None:
+        self.check.setText(tr("results_mark_for_removal"))
+        self.check.setAccessibleName(tr("results_mark_for_removal"))
         self._keep_badge.setText(tr("results_keep_this") if self.keeper else "")
+        self.reason_label.setText(" · ".join(tr(key) for key in self.reason_keys))
+        self.reason_label.setVisible(self.keeper)
+        self.reason_label.setToolTip(" · ".join(tr(key) for key in self.reason_keys))
+        confidence_text = (
+            tr(self.confidence_key, gap=f"{self.confidence_gap:.1f}")
+            if self.confidence_key
+            else ""
+        )
+        self.confidence_label.setText(confidence_text)
+        self.confidence_label.setVisible(self.keeper)
+        self.confidence_label.setToolTip(tr("keeper_confidence_explainer"))
+        self._btn_keep.setText(tr("results_make_keeper"))
+        self._btn_keep.setToolTip(tr("results_make_keeper"))
+        self._btn_keep.setAccessibleName(tr("results_make_keeper"))
+        self._btn_keep.setVisible(not self.keeper)
         self._btn_folder.setToolTip(tr("results_open_folder"))
         self._btn_compare.setToolTip(tr("results_compare"))
         self._update_meta()
+
+    def set_keeper(
+        self,
+        keeper: bool,
+        reason_keys: List[str],
+        confidence_key: str,
+        confidence_gap: float,
+        selected: Optional[bool] = None,
+    ) -> None:
+        self.keeper = keeper
+        self.reason_keys = reason_keys if keeper else []
+        self.confidence_key = confidence_key if keeper else ""
+        self.confidence_gap = confidence_gap if keeper else 0.0
+        if selected is not None:
+            self.check.blockSignals(True)
+            self.check.setChecked(selected)
+            self.check.blockSignals(False)
+        self.check.setEnabled(not keeper)
+        self.retranslate()
 
 
 class GroupCard(QFrame):
@@ -148,6 +228,8 @@ class GroupCard(QFrame):
     compare_requested = Signal(object, object)
     open_folder_requested = Signal(object)
     thumbnail_requested = Signal(object, object)  # path, tile
+    keeper_changed = Signal(object, object)  # group, selected keeper
+    selection_changed = Signal(object, bool)  # record, checked
 
     def __init__(self, group: DuplicateGroup, index: int, parent=None) -> None:
         super().__init__(parent)
@@ -180,6 +262,10 @@ class GroupCard(QFrame):
         self.title.setObjectName("PageSubtitle")
         header.addWidget(self.title)
 
+        self.match_detail = QLabel("", self)
+        self.match_detail.setObjectName("DimLabel")
+        header.addWidget(self.match_detail)
+
         header.addStretch()
 
         self.space_label = QLabel("", self)
@@ -196,7 +282,7 @@ class GroupCard(QFrame):
         tiles_scroll = QScrollArea(self)
         tiles_scroll.setObjectName("TileScroll")
         tiles_scroll.setWidgetResizable(True)
-        tiles_scroll.setFixedHeight(ImageTile.TILE_SIZE + 92)
+        tiles_scroll.setFixedHeight(ImageTile.TILE_SIZE + 210)
         tiles_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         tiles_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         tiles_scroll.setFrameShape(QFrame.NoFrame)
@@ -209,9 +295,22 @@ class GroupCard(QFrame):
         tiles_layout.addStretch()
 
         keeper = self.group.keeper
+        smart_keeper = SmartKeeper()
+        reason_keys = smart_keeper.recommendation_reasons(self.group.items, keeper)
+        confidence_key, confidence_gap = smart_keeper.recommendation_confidence(
+            self.group.items, keeper
+        )
         for record in self.group.items:
-            tile = ImageTile(record, keeper=record.id == keeper.id, parent=tiles_widget)
+            tile = ImageTile(
+                record,
+                keeper=record.id == keeper.id,
+                reason_keys=reason_keys,
+                confidence_key=confidence_key,
+                confidence_gap=confidence_gap,
+                parent=tiles_widget,
+            )
             tile.selection_changed.connect(self._on_selection_changed)
+            tile.keep_requested.connect(self._choose_keeper)
             tile.open_folder_requested.connect(self.open_folder_requested)
             tile.compare_requested.connect(self.compare_requested)
             if record.id != keeper.id:
@@ -244,6 +343,12 @@ class GroupCard(QFrame):
         )
         exact = group.is_exact
         self.badge.setText(tr("results_filter_exact") if exact else tr("results_filter_similar"))
+        self.match_detail.setText(
+            tr("results_match_exact")
+            if exact
+            else tr("results_match_visual", score=f"{group.similarity_score:.1f}")
+        )
+        self.match_detail.setToolTip(self.match_detail.text())
 
     def _emit_delete(self) -> None:
         self.delete_requested.emit(self.group, self.selected_records())
@@ -254,6 +359,34 @@ class GroupCard(QFrame):
             tile.blockSignals(True)
             tile.check.setChecked(checked)
             tile.blockSignals(False)
+        self.selection_changed.emit(record, checked)
+
+    def _choose_keeper(self, record: ImageRecord) -> None:
+        previous_keeper_id = self.group.keeper.id
+        self.group.keep_id = record.id
+        reason_keys = ["keeper_reason_user"]
+        confidence_key = "keeper_confidence_manual"
+        for tile in self._tiles:
+            is_new_keeper = tile.record.id == record.id
+            was_keeper = tile.record.id == previous_keeper_id
+            if is_new_keeper:
+                selected = False
+            elif was_keeper:
+                selected = True
+            else:
+                selected = None
+            tile.set_keeper(
+                is_new_keeper,
+                reason_keys,
+                confidence_key,
+                0.0,
+                selected=selected,
+            )
+            if selected is not None:
+                self.selection_changed.emit(tile.record, selected)
+            tile.set_compare_target(None if is_new_keeper else record)
+        self._update_header()
+        self.keeper_changed.emit(self.group, record)
 
     # ------------------------------------------------------------------
     # Accessors

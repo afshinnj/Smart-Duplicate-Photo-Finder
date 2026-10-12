@@ -11,7 +11,7 @@ import os
 import sys
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QStyle,
     QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -46,11 +47,11 @@ from .pages import (
 _log = get_logger("ui.main_window")
 
 _PAGES = (
-    ("dashboard", "nav_dashboard", "◧"),
-    ("scan", "nav_scan", "⌕"),
-    ("results", "nav_results", "◫"),
-    ("history", "nav_history", "◷"),
-    ("settings", "nav_settings", "✦"),
+    ("dashboard", "nav_dashboard", QStyle.SP_ComputerIcon),
+    ("scan", "nav_scan", QStyle.SP_DirOpenIcon),
+    ("results", "nav_results", QStyle.SP_FileDialogContentsView),
+    ("history", "nav_history", QStyle.SP_FileDialogDetailedView),
+    ("settings", "nav_settings", QStyle.SP_FileDialogInfoView),
 )
 
 
@@ -106,7 +107,7 @@ class MainWindow(QMainWindow):
         brand_row = QHBoxLayout()
         brand_row.setContentsMargins(4, 0, 4, 0)
         brand_row.setSpacing(10)
-        self._brand_icon = QLabel("◫", sidebar)
+        self._brand_icon = QLabel("D", sidebar)
         self._brand_icon.setObjectName("BrandIcon")
         self._brand_icon.setFixedSize(34, 34)
         self._brand_icon.setAlignment(Qt.AlignCenter)
@@ -123,7 +124,9 @@ class MainWindow(QMainWindow):
         self._nav_group.setExclusive(True)
         self._nav_buttons: Dict[str, QPushButton] = {}
         for key, label, icon in _PAGES:
-            button = QPushButton(f"  {icon}  {tr(label)}", sidebar)
+            button = QPushButton(tr(label), sidebar)
+            button.setIcon(self.style().standardIcon(icon))
+            button.setIconSize(QSize(18, 18))
             button.setObjectName("NavButton")
             button.setCheckable(True)
             button.setMinimumHeight(42)
@@ -286,6 +289,17 @@ class MainWindow(QMainWindow):
         )
         results_page = self._pages["results"]
         results_page.set_groups(groups, getattr(getattr(result, "session", None), "id", None))
+        issues = getattr(result, "errors", []) or []
+        issue_count = getattr(result, "skipped_files", len(issues))
+        if issue_count:
+            dialog = QMessageBox(self)
+            dialog.setIcon(QMessageBox.Warning)
+            dialog.setWindowTitle(tr("scan_issues_title"))
+            dialog.setText(tr("scan_issues_summary", count=issue_count))
+            dialog.setInformativeText(tr("scan_issues_expand", shown=len(issues)))
+            dialog.setDetailedText("\n".join(issues))
+            dialog.setStandardButtons(QMessageBox.Ok)
+            dialog.exec()
         if groups:
             self.show_page("results")
 
@@ -359,7 +373,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(tr("app_name"))
         self._brand.setText(tr("app_name"))
         for key, label, icon in _PAGES:
-            self._nav_buttons[key].setText(f"  {icon}  {tr(label)}")
+            self._nav_buttons[key].setText(tr(label))
         for page in self._pages.values():
             retranslate = getattr(page, "retranslate", None)
             if callable(retranslate):
@@ -379,7 +393,9 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.question(
                 self,
                 tr("nav_scan"),
-                tr("scan_cancel") + "?",
+                tr("scan_cancel_before_exit"),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
             )
             if answer not in (QMessageBox.Yes, QMessageBox.Ok):
                 event.ignore()

@@ -88,7 +88,7 @@ def _print_report(result: ScanResult, as_json: bool) -> None:
     print(f"  Duplicates     : {result.duplicate_count:,}")
     print(f"  Recoverable    : {_human_size(result.recoverable_bytes)}")
     if result.skipped_files:
-        print(f"  Skipped files  : {result.skipped_files:,}")
+        print(f"  Scan issues    : {result.skipped_files:,}")
     print("=" * 72)
     for index, group in enumerate(groups, start=1):
         tag = "EXACT " if group.is_exact else "SIMILAR"
@@ -124,9 +124,12 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 sys.stderr.write("\n")
                 sys.stderr.flush()
         _print_report(result, args.json)
-        if result.errors:
-            print(f"\n{len(result.errors)} error(s) were logged during the scan.",
-                  file=sys.stderr)
+        if result.skipped_files:
+            print(
+                f"\n{result.skipped_files} scan issue(s); "
+                f"details include up to {len(result.errors)} affected paths.",
+                file=sys.stderr,
+            )
         return 0
     finally:
         database.close()

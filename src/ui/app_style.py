@@ -217,6 +217,21 @@ QPushButton#SecondaryButton:disabled {{
     background-color: transparent;
     color: {placeholder};
 }}
+QPushButton#IconButton {{
+    background-color: transparent;
+    color: {text};
+    border: 1px solid {input_border};
+    border-radius: 6px;
+    padding: 0px;
+}}
+QPushButton#IconButton:hover {{
+    background-color: {surface_hover};
+    border-color: {input_border_hover};
+}}
+QPushButton#IconButton:disabled {{
+    color: {placeholder};
+    background-color: transparent;
+}}
 QPushButton#DangerButton {{
     background-color: {danger};
     color: #ffffff;

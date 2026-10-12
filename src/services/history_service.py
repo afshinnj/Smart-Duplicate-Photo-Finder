@@ -34,6 +34,10 @@ class HistoryService:
         """Reload the groups produced by a finished scan."""
         return self.group_repository.load_groups(session_id, self.image_repository)
 
+    def update_group_keeper(self, group_id: int, image_id: int) -> bool:
+        """Save a user's keeper selection for a previously stored group."""
+        return self.group_repository.update_keeper(group_id, image_id)
+
     def delete_session(self, session_id: int) -> None:
         """Remove a session together with its groups and image records."""
         self.group_repository.delete_groups_for_scan(session_id)

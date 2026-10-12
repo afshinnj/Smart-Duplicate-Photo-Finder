@@ -50,7 +50,10 @@ class DashboardPage(QWidget):
         root.addWidget(self._subtitle)
 
         # --- statistic cards -------------------------------------------
-        self._stats_row = QGridLayout(self)
+        # This is a nested layout. Giving it the page as parent would try to
+        # install a second top-level layout and silently detach the dashboard
+        # sections from ``root``.
+        self._stats_row = QGridLayout()
         self._stats_row.setSpacing(14)
         self._cards: List[StatCard] = []
 
@@ -68,7 +71,7 @@ class DashboardPage(QWidget):
         root.addLayout(self._stats_row)
 
         # --- shortcuts ---------------------------------------------------
-        buttons = QHBoxLayout(self)
+        buttons = QHBoxLayout()
         buttons.setSpacing(10)
         self._btn_scan = QPushButton(tr("scan_start"), self)
         self._btn_scan.setMinimumHeight(44)

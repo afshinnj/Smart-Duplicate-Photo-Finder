@@ -23,16 +23,6 @@ from ...models.scan_session import ScanSession
 from ...services.progress import format_size
 from ...i18n import tr
 
-_STATUS_ICONS = {
-    ScanStatus.COMPLETED: "✓",
-    ScanStatus.CANCELLED: "⊘",
-    ScanStatus.FAILED: "✕",
-    ScanStatus.RUNNING: "⟳",
-    ScanStatus.PAUSED: "⏸",
-    ScanStatus.PENDING: "…",
-}
-
-
 class HistoryPage(QWidget):
     """Lists previous scans and lets the user inspect or forget them."""
 
@@ -69,7 +59,9 @@ class HistoryPage(QWidget):
         self._table.setSelectionMode(QTableWidget.SingleSelection)
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._table.setAlternatingRowColors(True)
-        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        header = self._table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
         self._table.verticalHeader().setVisible(False)
         root.addWidget(self._table, stretch=1)
 
@@ -92,6 +84,7 @@ class HistoryPage(QWidget):
         self._update_empty_text()
 
         self._table.itemSelectionChanged.connect(self._update_actions)
+        self._table.cellDoubleClicked.connect(lambda _row, _column: self._view_selected())
         self._update_actions()
 
     # ------------------------------------------------------------------
@@ -122,7 +115,9 @@ class HistoryPage(QWidget):
         )
         for row, session in enumerate(self._sessions):
             self._table.setItem(row, 0, self._item(self._started_label(session)))
-            self._table.setItem(row, 1, self._item(self._folders_label(session)))
+            folders_item = self._item(self._folders_label(session))
+            folders_item.setToolTip("\n".join(session.folders))
+            self._table.setItem(row, 1, folders_item)
             self._table.setItem(row, 2, self._item(f"{session.files_scanned:,}"))
             self._table.setItem(row, 3, self._item(f"{session.images_found:,}"))
             self._table.setItem(row, 4, self._item(f"{session.duplicates_found:,}"))
@@ -152,7 +147,6 @@ class HistoryPage(QWidget):
 
     @staticmethod
     def _status_label(session: ScanSession) -> str:
-        icon = _STATUS_ICONS.get(session.status, "")
         labels = {
             ScanStatus.COMPLETED: tr("status_done"),
             ScanStatus.RUNNING: tr("status_scanning"),
@@ -161,7 +155,7 @@ class HistoryPage(QWidget):
             ScanStatus.FAILED: tr("scan_stage_failed"),
             ScanStatus.PAUSED: tr("scan_pause"),
         }
-        return f"{icon} {labels.get(session.status, session.status.value)}"
+        return labels.get(session.status, session.status.value)
 
     # ------------------------------------------------------------------
     # Actions
@@ -225,6 +219,4 @@ class HistoryPage(QWidget):
         self._update_actions()
 
     def _update_empty_text(self) -> None:
-        self._empty_label.setText(
-            f"<div style='font-size:36px'>◷</div><br>{tr('history_empty')}"
-        )
+        self._empty_label.setText(tr("history_empty"))

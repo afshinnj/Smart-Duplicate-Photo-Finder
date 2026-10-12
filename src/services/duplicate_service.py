@@ -59,6 +59,66 @@ class SmartKeeper:
         ranked = self.rank(records)
         return ranked[0][1] if ranked else None
 
+    def recommendation_reasons(
+        self, records: Sequence[ImageRecord], keeper: ImageRecord
+    ) -> List[str]:
+        """Return score factors that set the recommendation apart from peers."""
+        others = [record for record in records if record.id != keeper.id]
+        if not others:
+            return ["keeper_reason_combined"]
+
+        factors = (
+            ("keeper_reason_resolution", self._resolution_score),
+            ("keeper_reason_quality", self._quality_score),
+            ("keeper_reason_size", self._size_score),
+            ("keeper_reason_date", self._date_score),
+            ("keeper_reason_name", self._name_score),
+            ("keeper_reason_location", self._path_score),
+        )
+        advantages = []
+        for key, score in factors:
+            keeper_score = score(keeper)
+            peer_best = max(score(record) for record in others)
+            if keeper_score > peer_best:
+                advantages.append((keeper_score - peer_best, key))
+
+        if not advantages:
+            return ["keeper_reason_combined"]
+        advantages.sort(reverse=True)
+        return [advantages[0][1]]
+
+    def recommendation_confidence(
+        self, records: Sequence[ImageRecord], keeper: ImageRecord
+    ) -> Tuple[str, float]:
+        """Classify heuristic confidence and return the top-two score gap.
+
+        Confidence is deliberately capped when the recommendation is explained
+        only by filename or folder hints; this is not a statistical probability.
+        """
+        ranked = self.rank(records)
+        if len(ranked) < 2:
+            return "keeper_confidence_low", 0.0
+
+        (top_score, top_record), (second_score, _) = ranked[:2]
+        if top_record.id != keeper.id:
+            return "keeper_confidence_manual", 0.0
+
+        gap = min(
+            100.0,
+            100.0 * max(0.0, top_score - second_score) / max(abs(top_score), 1.0),
+        )
+        reasons = set(self.recommendation_reasons(records, top_record))
+        technical = bool(reasons & {"keeper_reason_resolution", "keeper_reason_quality"})
+        supporting = bool(reasons & {"keeper_reason_size", "keeper_reason_date"})
+
+        if gap < 5.0 or not (technical or supporting):
+            confidence = "keeper_confidence_low"
+        elif technical and gap >= 15.0:
+            confidence = "keeper_confidence_high"
+        else:
+            confidence = "keeper_confidence_medium"
+        return confidence, gap
+
     # ------------------------------------------------------------------
     # Individual criteria
     # ------------------------------------------------------------------

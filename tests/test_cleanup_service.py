@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
 from src.core.config import AppConfig, CleanupSettings
 from src.core.constants import CleanupMethod
@@ -80,6 +81,64 @@ class TestCleanupService(unittest.TestCase):
         self.assertFalse(os.path.exists(record.path))
         # Undo bookkeeping still exists but there is nothing to restore.
         self.assertEqual(self.service.undo(), 0)
+
+    def test_database_failure_does_not_touch_quarantine_source(self) -> None:
+        record = self._record(self.layout["copy"])
+        with patch.object(self.service._repository, "add", side_effect=RuntimeError("db down")):
+            result = self.service.remove([record])
+
+        self.assertEqual(result.removed_count, 0)
+        self.assertEqual(result.failed_count, 1)
+        self.assertTrue(os.path.exists(record.path))
+        self.assertEqual(self.service.pending_undo_count(), 0)
+
+    def test_quarantine_move_failure_closes_undo_entry(self) -> None:
+        record = self._record(self.layout["copy"])
+        with patch("src.services.cleanup_service.shutil.move", side_effect=OSError("disk error")):
+            result = self.service.remove([record])
+
+        self.assertEqual(result.removed_count, 0)
+        self.assertEqual(result.failed_count, 1)
+        self.assertTrue(os.path.exists(record.path))
+        self.assertEqual(self.service.pending_undo_count(), 0)
+
+    def test_permanent_delete_database_failure_preserves_file(self) -> None:
+        record = self._record(self.layout["copy"])
+        with patch.object(self.service._repository, "add", side_effect=RuntimeError("db down")):
+            result = self.service.remove([record], method=CleanupMethod.PERMANENT)
+
+        self.assertEqual(result.removed_count, 0)
+        self.assertEqual(result.failed_count, 1)
+        self.assertTrue(os.path.exists(record.path))
+
+    def test_permanent_delete_failure_closes_undo_entry(self) -> None:
+        record = self._record(self.layout["copy"])
+        with patch("src.services.cleanup_service.os.remove", side_effect=OSError("file locked")):
+            result = self.service.remove([record], method=CleanupMethod.PERMANENT)
+
+        self.assertEqual(result.removed_count, 0)
+        self.assertEqual(result.failed_count, 1)
+        self.assertTrue(os.path.exists(record.path))
+        self.assertEqual(self.service.pending_undo_count(), 0)
+
+    def test_undo_uses_new_name_when_original_path_is_occupied(self) -> None:
+        record = self._record(self.layout["copy"])
+        with open(record.path, "rb") as handle:
+            quarantined_content = handle.read()
+        self.service.remove([record])
+
+        with open(record.path, "wb") as handle:
+            handle.write(b"new file at original path")
+
+        self.assertEqual(self.service.undo(), 1)
+        base, extension = os.path.splitext(record.path)
+        restored_path = f"{base}_restored_1{extension}"
+        self.assertTrue(os.path.exists(record.path))
+        self.assertTrue(os.path.exists(restored_path))
+        with open(record.path, "rb") as handle:
+            self.assertEqual(handle.read(), b"new file at original path")
+        with open(restored_path, "rb") as handle:
+            self.assertEqual(handle.read(), quarantined_content)
 
 
 if __name__ == "__main__":

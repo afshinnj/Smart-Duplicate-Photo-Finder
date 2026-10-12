@@ -12,7 +12,7 @@ import subprocess
 import sys
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -49,6 +49,15 @@ class ResultsPage(QWidget):
         self._groups: List[DuplicateGroup] = []
         self._cards: List[GroupCard] = []
         self._session_id: Optional[int] = None
+        self._selected_paths: set[str] = set()
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(180)
+        self._search_timer.timeout.connect(self._apply_filters)
+        self._scroll_restore_timer = QTimer(self)
+        self._scroll_restore_timer.setSingleShot(True)
+        self._scroll_restore_timer.timeout.connect(self._restore_scroll_position)
+        self._pending_scroll_position = 0
         self._build()
 
     # ------------------------------------------------------------------
@@ -84,7 +93,7 @@ class ResultsPage(QWidget):
         self._search = QLineEdit(self)
         self._search.setPlaceholderText(tr("results_search"))
         self._search.setClearButtonEnabled(True)
-        self._search.textChanged.connect(self._apply_filters)
+        self._search.textChanged.connect(self._schedule_search)
         filters.addWidget(self._search, stretch=3)
 
         self._filter = QComboBox(self)
@@ -117,6 +126,10 @@ class ResultsPage(QWidget):
         self._btn_select_all.setObjectName("SecondaryButton")
         self._btn_select_all.clicked.connect(self._select_all_duplicates)
         actions.addWidget(self._btn_select_all)
+
+        self._selection_label = QLabel("", self)
+        self._selection_label.setObjectName("DimLabel")
+        actions.addWidget(self._selection_label)
 
         actions.addStretch()
 
@@ -162,9 +175,11 @@ class ResultsPage(QWidget):
     # ------------------------------------------------------------------
 
     def set_groups(self, groups: List[DuplicateGroup], session_id: Optional[int] = None) -> None:
+        self._search_timer.stop()
         self._groups = list(groups)
         self._session_id = session_id
-        self._rebuild_cards()
+        self._selected_paths.clear()
+        self._scroll.verticalScrollBar().setValue(0)
         self._apply_filters()
 
     def load_latest(self) -> bool:
@@ -192,26 +207,73 @@ class ResultsPage(QWidget):
         self._cards.clear()
 
     def _rebuild_cards(self) -> None:
+        scroll_bar = self._scroll.verticalScrollBar()
+        scroll_position = scroll_bar.value()
         self._clear_cards()
         self._context.thumbnail_loader.clear_pending()
         for index, group in enumerate(self._filtered_and_sorted()):
             card = GroupCard(group, index, parent=self._container)
             card.delete_requested.connect(self._delete_group_records)
+            card.keeper_changed.connect(self._persist_keeper_choice)
+            card.selection_changed.connect(self._on_selection_changed)
             card.compare_requested.connect(self.compare_requested.emit)
             card.open_folder_requested.connect(self._open_folder)
             card.thumbnail_requested.connect(self._load_thumbnail)
             self._container_layout.insertWidget(self._container_layout.count() - 1, card)
             self._cards.append(card)
+            for tile in card._tiles:  # noqa: SLF001 - restore selection after rebuilding
+                tile.check.setChecked(self._path_key(tile.record) in self._selected_paths)
             # Connected above; the card must only emit now, after the wiring is
             # in place, otherwise the requests are lost.
             card.request_thumbnails()
         self._update_summary()
+        self._update_selection_label()
         self._refresh_empty_state()
+        self._pending_scroll_position = scroll_position
+        self._scroll_restore_timer.start(0)
+
+    def _restore_scroll_position(self) -> None:
+        scroll_bar = self._scroll.verticalScrollBar()
+        scroll_bar.setValue(min(self._pending_scroll_position, scroll_bar.maximum()))
+
+    @staticmethod
+    def _path_key(record: ImageRecord) -> str:
+        return os.path.normcase(os.path.abspath(record.path))
+
+    def _on_selection_changed(self, record: ImageRecord, selected: bool) -> None:
+        key = self._path_key(record)
+        if selected:
+            self._selected_paths.add(key)
+        else:
+            self._selected_paths.discard(key)
+        self._update_selection_label()
+
+    def _update_selection_label(self) -> None:
+        count = len(self._selected_paths)
+        self._selection_label.setText(
+            tr("cleanup_files", count=count) if count else ""
+        )
+        self._selection_label.setVisible(count > 0)
 
     def _load_thumbnail(self, path: str, tile) -> None:
         self._context.thumbnail_loader.request(path).finished.connect(
             lambda loaded_path, pixmap: self._on_thumbnail(loaded_path, pixmap)
         )
+
+    def _persist_keeper_choice(self, group: DuplicateGroup, record: ImageRecord) -> None:
+        if group.id is None or record.id is None:
+            return
+        try:
+            saved = self._context.history_service.update_group_keeper(group.id, record.id)
+            if not saved:
+                raise RuntimeError("The selected image is not a member of this saved group")
+        except Exception as exc:
+            _log.exception("Could not save keeper choice for group %s", group.id)
+            QMessageBox.warning(
+                self,
+                tr("results_keep_this"),
+                f"{tr('results_keeper_save_failed')}\n\n{exc}",
+            )
 
     def _on_thumbnail(self, path: str, pixmap) -> None:
         for card in self._cards:
@@ -236,9 +298,7 @@ class ResultsPage(QWidget):
             if not self._groups
             else tr("results_empty")
         )
-        self._empty_label.setText(
-            f"<div style='font-size:36px'>◫</div><br>{message}"
-        )
+        self._empty_label.setText(message)
 
     # ------------------------------------------------------------------
     # Filtering and sorting
@@ -311,7 +371,11 @@ class ResultsPage(QWidget):
             return (keeper.path.lower(), -group.similarity_score)
         return (-group.similarity_score, -group.wasted_bytes)
 
+    def _schedule_search(self) -> None:
+        self._search_timer.start()
+
     def _apply_filters(self) -> None:
+        self._search_timer.stop()
         self._rebuild_cards()
 
     def _select_all_duplicates(self) -> None:
@@ -391,9 +455,14 @@ class ResultsPage(QWidget):
             f"{tr('cleanup_total_size')} {format_size(size)}\n\n"
             f"{method_text}"
         )
-        return QMessageBox.question(
-            self, tr("cleanup_confirm_title"), message
-        ) in (QMessageBox.Yes, QMessageBox.Ok)
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Question)
+        dialog.setWindowTitle(tr("cleanup_confirm_title"))
+        dialog.setText(message)
+        dialog.setDetailedText(self._cleanup_details(records))
+        dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        dialog.setDefaultButton(QMessageBox.No)
+        return dialog.exec() == QMessageBox.Yes
 
     def _confirm_permanent(self, records: List[ImageRecord]) -> bool:
         size = sum(record.size for record in records)
@@ -401,13 +470,23 @@ class ResultsPage(QWidget):
             f"{tr('cleanup_permanent_warning')}\n\n"
             f"{tr('cleanup_files', count=len(records))} · {format_size(size)}"
         )
-        return QMessageBox.warning(
-            self,
-            tr("cleanup_confirm_title"),
-            message,
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        ) == QMessageBox.Yes
+        dialog = QMessageBox(self)
+        dialog.setIcon(QMessageBox.Warning)
+        dialog.setWindowTitle(tr("cleanup_confirm_title"))
+        dialog.setText(message)
+        dialog.setDetailedText(self._cleanup_details(records))
+        dialog.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        dialog.setDefaultButton(QMessageBox.No)
+        return dialog.exec() == QMessageBox.Yes
+
+    @staticmethod
+    def _cleanup_details(records: List[ImageRecord]) -> str:
+        header = f"{tr('cleanup_preview_file')}\t{tr('cleanup_preview_size')}\t{tr('cleanup_preview_path')}"
+        rows = [
+            f"{record.filename}\t{format_size(record.size)}\t{record.path}"
+            for record in records
+        ]
+        return "\n".join([header, *rows])
 
     def _after_cleanup(self, removed: int, size: int, focus_group: Optional[DuplicateGroup]) -> None:
         _log.info("Removed %d files (%s)", removed, format_size(size))
@@ -416,6 +495,9 @@ class ResultsPage(QWidget):
         for group in self._groups:
             group.items = [item for item in group.items if os.path.exists(item.path)]
         self._groups = [group for group in self._groups if len(group.items) > 1]
+        self._selected_paths = {
+            key for key in self._selected_paths if os.path.exists(key)
+        }
         self._rebuild_cards()
         self._update_undo_state()
 
@@ -478,5 +560,6 @@ class ResultsPage(QWidget):
         for card in self._cards:
             card.retranslate()
         self._update_summary()
+        self._update_selection_label()
         self._refresh_empty_state()
         self._update_undo_state()

@@ -138,34 +138,34 @@ class CleanupService:
         return result
 
     def _remove_one(self, record: ImageRecord, method: constants.CleanupMethod) -> int:
-        if method == constants.CleanupMethod.QUARANTINE:
-            backup_path = self._quarantine(record)
-            return self._repository.add(
-                image_id=record.id,
-                original_path=record.path,
-                backup_path=backup_path,
-                method=method,
-                size=record.size,
-            )
-        if method == constants.CleanupMethod.RECYCLE_BIN:
-            self._send_to_recycle_bin(record.path)
-            return self._repository.add(
-                image_id=record.id,
-                original_path=record.path,
-                backup_path=None,
-                method=method,
-                size=record.size,
-            )
-        # Permanent deletion is destructive: keep the record so the user can
-        # at least see what was removed.
-        os.remove(record.path)
-        return self._repository.add(
+        # Write undo/audit bookkeeping first. If the filesystem operation
+        # fails, close the entry so it cannot appear as a pending undo.
+        backup_path = (
+            self._quarantine_destination(record)
+            if method == constants.CleanupMethod.QUARANTINE
+            else None
+        )
+        operation_id = self._repository.add(
             image_id=record.id,
             original_path=record.path,
-            backup_path=None,
+            backup_path=backup_path,
             method=method,
             size=record.size,
         )
+
+        try:
+            if method == constants.CleanupMethod.QUARANTINE:
+                shutil.move(record.path, backup_path)
+            elif method == constants.CleanupMethod.RECYCLE_BIN:
+                self._send_to_recycle_bin(record.path)
+            else:
+                # Permanent deletion is destructive; its history is recorded
+                # before removing the file so a database failure cannot hide it.
+                os.remove(record.path)
+        except Exception:
+            self._repository.mark_restored(operation_id)
+            raise
+        return operation_id
 
     # ------------------------------------------------------------------
     # Quarantine
@@ -177,7 +177,7 @@ class CleanupService:
         safe_name = os.path.basename(record.path).replace(":", "_")
         return f"{timestamp}_{safe_name}"
 
-    def _quarantine(self, record: ImageRecord) -> str:
+    def _quarantine_destination(self, record: ImageRecord) -> str:
         quarantine = constants.quarantine_dir()
         destination = os.path.join(quarantine, self._quarantine_name(record))
         counter = 1
@@ -185,10 +185,6 @@ class CleanupService:
             base, extension = os.path.splitext(destination)
             destination = f"{base}_{counter}{extension}"
             counter += 1
-        try:
-            shutil.move(record.path, destination)
-        except OSError as exc:
-            raise CleanupError(f"Cannot quarantine {record.path}: {exc}") from exc
         return destination
 
     # ------------------------------------------------------------------
@@ -229,8 +225,11 @@ class CleanupService:
         operation.lpszProgressTitle = None
 
         result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(operation))  # type: ignore[attr-defined]
-        if result != 0:
-            raise CleanupError(f"Recycle Bin operation failed (error {result}) for {path}")
+        if result != 0 or operation.fAnyOperationsAborted:
+            raise CleanupError(
+                f"Recycle Bin operation failed (error {result}, "
+                f"aborted={bool(operation.fAnyOperationsAborted)}) for {path}"
+            )
 
     # ------------------------------------------------------------------
     # Undo

@@ -165,6 +165,17 @@ class GroupRepository:
                 stored += 1
         return stored
 
+    def update_keeper(self, group_id: int, image_id: int) -> bool:
+        """Persist a user's keeper choice only if the image belongs to group."""
+        with self._db.lock:
+            cursor = self._db.execute(
+                "UPDATE duplicate_groups SET keep_id = ? WHERE id = ? AND EXISTS ("
+                "SELECT 1 FROM group_items WHERE group_id = ? AND image_id = ?)",
+                (image_id, group_id, group_id, image_id),
+            )
+            self._db.commit()
+            return cursor.rowcount > 0
+
     def group_count(self, scan_id: Optional[int] = None) -> int:
         if scan_id is None:
             row = self._db.query_one("SELECT COUNT(*) AS total FROM duplicate_groups")

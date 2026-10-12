@@ -32,6 +32,8 @@ class ScanEvent(Enum):
 class ScanContext:
     """Mutable state shared between the scanner and its caller."""
 
+    MAX_REPORTED_ERRORS = 100
+
     cancel_requested: bool = False
     pause_requested: bool = False
     files_scanned: int = 0
@@ -39,6 +41,12 @@ class ScanContext:
     current_path: str = ""
     start_time: float = field(default_factory=time.time)
     errors: List[str] = field(default_factory=list)
+    error_count: int = 0
+
+    def add_error(self, message: str) -> None:
+        self.error_count += 1
+        if len(self.errors) < self.MAX_REPORTED_ERRORS:
+            self.errors.append(message)
 
     def request_cancel(self) -> None:
         self.cancel_requested = True
@@ -109,56 +117,57 @@ class FileScanner:
     def _walk(
         self, root: str, context: ScanContext, extensions: set[str]
     ) -> Iterator[ScannedFile]:
-        try:
-            entries = list(os.scandir(root))
-        except (PermissionError, OSError) as exc:
-            context.errors.append(root)
-            _log.debug("Access denied: %s (%s)", root, exc)
-            return
-
         directories = []
-        for entry in entries:
-            if context.cancel_requested:
-                raise ScanCancelled()
-            if context.pause_requested:
-                self._wait_for_resume(context)
+        try:
+            # Stream directory entries instead of retaining every DirEntry in
+            # a list; large photo folders can contain hundreds of thousands.
+            with os.scandir(root) as entries:
+                for entry in entries:
+                    if context.cancel_requested:
+                        raise ScanCancelled()
+                    if context.pause_requested:
+                        self._wait_for_resume(context)
 
-            try:
-                is_dir = entry.is_dir()
-            except OSError:
-                continue
+                    try:
+                        is_dir = entry.is_dir()
+                    except OSError as exc:
+                        context.add_error(f"{entry.path}: {exc}")
+                        continue
 
-            if is_dir:
-                if self._is_scannable(entry.path):
-                    directories.append(entry.path)
-                continue
+                    if is_dir:
+                        if self._is_scannable(entry.path):
+                            directories.append(entry.path)
+                        continue
 
-            try:
-                if not entry.is_file():
-                    continue
-                info = entry.stat()
-            except (PermissionError, OSError):
-                context.errors.append(entry.path)
-                continue
+                    try:
+                        if not entry.is_file():
+                            continue
+                        info = entry.stat()
+                    except (PermissionError, OSError) as exc:
+                        context.add_error(f"{entry.path}: {exc}")
+                        continue
 
-            if not self._pass_filters(entry.name, info.st_size, info):
-                continue
+                    if not self._pass_filters(entry.name, info.st_size, info):
+                        continue
 
-            context.files_scanned += 1
-            context.current_path = entry.path
+                    context.files_scanned += 1
+                    context.current_path = entry.path
 
-            extension = os.path.splitext(entry.name)[1].lower()
-            if extension not in extensions:
-                continue
+                    extension = os.path.splitext(entry.name)[1].lower()
+                    if extension not in extensions:
+                        continue
 
-            context.images_found += 1
-            yield ScannedFile(
-                path=entry.path,
-                size=info.st_size,
-                modified_at=info.st_mtime,
-                created_at=getattr(info, "st_ctime", info.st_mtime),
-                is_hidden=self._is_hidden(entry.name),
-            )
+                    context.images_found += 1
+                    yield ScannedFile(
+                        path=entry.path,
+                        size=info.st_size,
+                        modified_at=info.st_mtime,
+                        created_at=getattr(info, "st_ctime", info.st_mtime),
+                        is_hidden=self._is_hidden(entry.name),
+                    )
+        except (PermissionError, OSError) as exc:
+            context.add_error(f"{root}: {exc}")
+            _log.debug("Cannot scan directory: %s (%s)", root, exc)
 
         for directory in directories:
             yield from self._walk(directory, context, extensions)

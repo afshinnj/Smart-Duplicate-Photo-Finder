@@ -224,8 +224,16 @@ class ScanService:
             result.groups = groups
             result.duplicate_count = self.duplicate_service.duplicate_count(groups)
             result.recoverable_bytes = self.duplicate_service.recoverable_space(groups)
-            result.errors = controller.context.errors[:200]
-            result.skipped_files = len(result.errors)
+            processing_errors = []
+            processing_error_count = 0
+            for record in records:
+                if record.error:
+                    processing_error_count += 1
+                    if len(processing_errors) < 100:
+                        processing_errors.append(f"{record.path}: {record.error}")
+            all_errors = [*controller.context.errors, *processing_errors]
+            result.skipped_files = controller.context.error_count + processing_error_count
+            result.errors = all_errors[:200]
 
             # ---- Finalise ---------------------------------------------------
             self._emit(progress, stage_progress, ScanStage.FINALIZING, controller, session)
@@ -338,10 +346,10 @@ class ScanService:
         )
         stage_progress.complete(ScanStage.SCANNING)
         _log.info(
-            "Walked %d files, found %d images, %d inaccessible folders",
+            "Walked %d files, found %d images, recorded %d scan issues",
             controller.context.files_scanned,
             len(image_files),
-            len(controller.context.errors),
+            controller.context.error_count,
         )
         return controller.context.files_scanned, image_files
 
@@ -380,39 +388,48 @@ class ScanService:
                 return cached
             return self._hash_fresh(scanned, detector, session.id)
 
+        failures = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(process_file, scanned): scanned for scanned in image_files
-            }
-            failures = 0
-            for future in as_completed(futures):
+            for offset in range(0, len(image_files), _HASH_BATCH_SIZE):
                 if controller.is_cancelled:
-                    for pending in futures:
-                        pending.cancel()
                     raise ScanCancelled()
-                try:
-                    record = future.result()
-                except Exception as exc:
-                    failures += 1
-                    _log.debug("Hashing failed: %s", exc)
-                    continue
-                if record is None:
-                    failures += 1
-                    continue
-                records.append(record)
-                processed += 1
-                if time.time() - last_tick > 0.15:
-                    self._emit(
-                        progress,
-                        stage_progress,
-                        ScanStage.METADATA,
-                        controller,
-                        session,
-                        images_found=processed,
-                        current_path=record.path,
-                        stage_progress_value=100.0 * processed / max(1, len(image_files)),
-                    )
-                    last_tick = time.time()
+                batch = image_files[offset : offset + _HASH_BATCH_SIZE]
+                futures = {pool.submit(process_file, scanned): scanned for scanned in batch}
+                for future in as_completed(futures):
+                    if controller.is_cancelled:
+                        for pending in futures:
+                            pending.cancel()
+                        raise ScanCancelled()
+                    try:
+                        record = future.result()
+                    except Exception as exc:
+                        failures += 1
+                        scanned = futures[future]
+                        controller.context.add_error(
+                            f"{scanned.path}: {type(exc).__name__}: {exc}"
+                        )
+                        _log.debug("Hashing failed: %s", exc)
+                        continue
+                    if record is None:
+                        failures += 1
+                        controller.context.add_error(
+                            f"{futures[future].path}: could not be processed"
+                        )
+                        continue
+                    records.append(record)
+                    processed += 1
+                    if time.time() - last_tick > 0.15:
+                        self._emit(
+                            progress,
+                            stage_progress,
+                            ScanStage.METADATA,
+                            controller,
+                            session,
+                            images_found=processed,
+                            current_path=record.path,
+                            stage_progress_value=100.0 * processed / max(1, len(image_files)),
+                        )
+                        last_tick = time.time()
 
         # Persist everything now so every record carries a database id, which
         # the grouping stage needs to link duplicate groups back to images.
@@ -515,11 +532,14 @@ class ScanService:
                             key = (index_a, index_b) if index_a < index_b else (index_b, index_a)
                             if key in seen_pairs:
                                 continue
+                            # A pair may share blocks in several hash families.
+                            # Record it before scoring so rejected pairs are not
+                            # recomputed for every matching block.
+                            seen_pairs.add(key)
                             score = self._hash_similarity(
                                 hash_name, records[index_a], records[index_b]
                             )
                             if score is not None and score >= 55.0:
-                                seen_pairs.add(key)
                                 id_a = int(records[index_a].id or -1)
                                 id_b = int(records[index_b].id or -1)
                                 candidates.append((id_a, id_b, score))
